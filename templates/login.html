@@ -1,0 +1,231 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+  .auth-wrap {
+    min-height: calc(100vh - 76px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 0;
+  }
+
+  .auth-shell {
+    width: min(1200px, 96vw);
+    border-radius: 22px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(0,0,0,0.25);
+    backdrop-filter: blur(18px);
+  }
+
+  .auth-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    min-height: 560px;
+  }
+
+  .brand-panel {
+    position: relative;
+    padding: 3.2rem 3rem;
+    background: linear-gradient(135deg, #bfe9ff 0%, #d9f2ff 35%, #d6c8ff 100%);
+    color: #0f172a;
+  }
+  .brand-panel::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -120px;
+    width: 240px;
+    height: 100%;
+    background: linear-gradient(135deg, #bfe9ff 0%, #d6c8ff 100%);
+    transform: skewX(-12deg);
+    box-shadow: 10px 0 30px rgba(0,0,0,0.18);
+  }
+
+  .brand-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 520px;
+  }
+
+  .brand-mark {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.06);
+    border: 1px solid rgba(15, 23, 42, 0.10);
+    margin-bottom: 18px;
+  }
+  .brand-mark i { font-size: 22px; color: #0f172a; }
+
+  .brand-title {
+    font-size: 2.6rem;
+    font-weight: 900;
+    margin: 0;
+    letter-spacing: 0.02em;
+  }
+
+  .brand-sub {
+    margin-top: 4px;
+    opacity: 0.7;
+    font-weight: 500;
+  }
+
+  .brand-metrics {
+    margin-top: 34px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+  .metric-k {
+    font-size: 12px;
+    opacity: 0.65;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .metric-v {
+    font-size: 16px;
+    font-weight: 800;
+  }
+
+  .brand-foot {
+    margin-top: 26px;
+    opacity: 0.7;
+    font-size: 13px;
+  }
+
+  .form-panel {
+    position: relative;
+    padding: 3.2rem 3rem;
+    background: linear-gradient(135deg, rgba(6, 10, 18, 0.92) 0%, rgba(8, 14, 24, 0.92) 55%, rgba(10, 22, 34, 0.92) 100%);
+    color: #e5e7eb;
+  }
+
+  .form-title {
+    font-size: 1.8rem;
+    font-weight: 800;
+    margin: 0;
+  }
+  .form-sub {
+    margin-top: 6px;
+    opacity: 0.7;
+    font-size: 13px;
+  }
+
+  .auth-input {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    color: #e5e7eb;
+    border-radius: 14px;
+    padding: 0.85rem 1rem;
+  }
+  .auth-input:focus {
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(99, 102, 241, 0.55);
+    box-shadow: 0 0 0 0.25rem rgba(99, 102, 241, 0.20);
+    color: #fff;
+  }
+
+  .auth-label {
+    font-size: 12px;
+    opacity: 0.75;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .auth-btn {
+    border-radius: 14px;
+    padding: 0.85rem 1rem;
+    font-weight: 800;
+    border: none;
+    background: linear-gradient(90deg, #7c5cff 0%, #2bd3ff 100%);
+    box-shadow: 0 10px 26px rgba(43, 211, 255, 0.20);
+  }
+  .auth-btn:hover {
+    filter: brightness(1.03);
+  }
+
+  .auth-link {
+    color: #2bd3ff;
+    text-decoration: none;
+  }
+  .auth-link:hover { text-decoration: underline; }
+
+  .auth-alert {
+    border-radius: 14px;
+    border: 1px solid rgba(244, 67, 54, 0.25);
+    background: rgba(244, 67, 54, 0.10);
+    color: #ffd2cf;
+  }
+
+  @media (max-width: 992px) {
+    .auth-grid {
+      grid-template-columns: 1fr;
+    }
+    .brand-panel::after {
+      display: none;
+    }
+  }
+</style>
+
+<div class="auth-wrap">
+  <div class="auth-shell">
+    <div class="auth-grid">
+      <div class="brand-panel">
+        <div class="brand-inner">
+          <div class="brand-mark"><i class="bi bi-activity"></i></div>
+          <h1 class="brand-title">{{ _('stma') }}</h1>
+          <div class="brand-sub">{{ _('service_token_intelligence') }}</div>
+
+          <div class="brand-metrics">
+            <div>
+              <div class="metric-k">Accuracy</div>
+              <div class="metric-v">98.5%</div>
+            </div>
+            <div>
+              <div class="metric-k">Avg wait</div>
+              <div class="metric-v">2.4m</div>
+            </div>
+            <div>
+              <div class="metric-k">Uptime</div>
+              <div class="metric-v">24/7</div>
+            </div>
+          </div>
+
+          <div class="brand-foot">Secure access for Admin, Receptionist, and Service roles.</div>
+        </div>
+      </div>
+
+      <div class="form-panel">
+        <div class="form-title">Welcome back</div>
+        <div class="form-sub">Sign in to your account to continue</div>
+
+        {% if error %}
+          <div class="alert auth-alert mt-3">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" class="mt-4">
+          <div class="mb-3">
+            <label for="username" class="form-label auth-label">{{ _('username') }}</label>
+            <input type="text" class="form-control auth-input" id="username" name="username" autocomplete="username" required>
+          </div>
+          <div class="mb-3">
+            <label for="password" class="form-label auth-label">{{ _('password') }}</label>
+            <input type="password" class="form-control auth-input" id="password" name="password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" class="btn auth-btn w-100"><i class="bi bi-box-arrow-in-right me-2"></i>{{ _('login') }}</button>
+        </form>
+
+        <div class="mt-3 text-center">
+          <a href="/register" class="auth-link small"><i class="bi bi-person-plus me-1"></i>{{ _('register') }}</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,192 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <div class="stma-title h4 mb-0">{{ _('service_panel') }}</div>
+      <div class="stma-soft small">Start / end tokens and keep the queue moving</div>
+    </div>
+  </div>
+
+  <div id="doctor-dashboards" class="row g-3"></div>
+  <script>
+    let fatigueMap = {};
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action][data-id]');
+      if (!btn) return;
+      const id = parseInt(btn.getAttribute('data-id'), 10);
+      const action = btn.getAttribute('data-action');
+      if (!id || !action) return;
+      if (action === 'start') startService(id);
+      if (action === 'end') endService(id);
+    });
+
+    function patientBadges(t) {
+      const cat = (t.patient_category || 'Regular');
+      let catBadge = '<span class="badge text-bg-secondary" title="Regular">Regular</span>';
+      if (cat === 'Emergency') catBadge = '<span class="badge text-bg-danger" title="Emergency">Emergency</span>';
+      else if (cat === 'Chronic Illness') catBadge = '<span class="badge" style="background:#f39c12;" title="Chronic Illness">Chronic</span>';
+      else if (cat === 'Senior Citizen') catBadge = '<span class="badge" style="background:#3498db;" title="Senior Citizen">Senior</span>';
+
+      const aiReason = (t.ai_priority_reason || '');
+      const aiBadge = `<span class="badge bg-dark ms-1" title="${aiReason.replaceAll('"','&quot;')}">AI P${t.ai_priority_level ?? '-'}</span>`;
+      const riskBadge = `<span class="badge bg-dark ms-1" title="Risk score">R${t.risk_score ?? '-'}</span>`;
+      const fu = (t.is_followup || 0) === 1 ? '<span class="badge text-bg-info ms-1">FOLLOW-UP</span>' : '';
+      return `${catBadge}${fu}${aiBadge}${riskBadge}`;
+    }
+
+    function statusBadge(status) {
+      if (status === 'Completed') return '<span class="badge text-bg-success">Completed</span>';
+      if (status === 'InProgress') return '<span class="badge text-bg-primary">InProgress</span>';
+      if (status === 'Waiting') return '<span class="badge text-bg-warning">Waiting</span>';
+      return '<span class="badge text-bg-secondary">Generated</span>';
+    }
+
+    function renderDashboards(groups) {
+      const host = document.getElementById('doctor-dashboards');
+      host.innerHTML = '';
+
+      for (const g of groups || []) {
+        const col = document.createElement('div');
+        col.className = 'col-12 col-lg-6';
+        const title = g.doctor_id ? `${g.doctor_name}` : 'Unassigned';
+        col.innerHTML = `
+          <div class="stma-card p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="fw-semibold"><i class="bi bi-person-badge me-1"></i>${title}</div>
+              <span class="badge text-bg-info-subtle">${(g.tokens || []).length} tokens</span>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Patient</th>
+                    <th>Type</th>
+                    <th class="text-end">Status</th>
+                    <th class="text-end">Action</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        `;
+        const tbody = col.querySelector('tbody');
+        const toks = (g.tokens || []).filter(t => t.status !== 'Completed');
+        if (!toks.length) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td colspan="5" class="small text-muted">No active tokens</td>';
+          tbody.appendChild(tr);
+        } else {
+          for (const t of toks) {
+            const tr = document.createElement('tr');
+            const fatigue = fatigueMap[String(t.doctor_id || '')];
+            const fatigueBadge = fatigue && fatigue.fatigue_risk ? ' <span class="badge text-bg-warning ms-1">FATIGUE</span>' : '';
+            tr.innerHTML = `
+              <td class="fw-semibold">${t.token_number}${fatigueBadge}<div class="small text-muted">ID ${t.id}</div></td>
+              <td>${t.patient_name ? `<span class="fw-semibold">${t.patient_name}</span>` : '<span class="text-muted">-</span>'}</td>
+              <td>${patientBadges(t)}</td>
+              <td class="text-end">${statusBadge(t.status)}</td>
+              <td class="text-end"></td>
+            `;
+            const tdActions = tr.querySelector('td:last-child');
+            if (t.status === 'Generated' || t.status === 'Waiting') {
+              const b = document.createElement('button');
+              b.className = 'btn btn-sm btn-success';
+              b.innerHTML = '<i class="bi bi-play-fill me-1"></i>Start';
+              b.onclick = () => startService(t.id);
+              tdActions.appendChild(b);
+            } else if (t.status === 'InProgress') {
+              const b = document.createElement('button');
+              b.className = 'btn btn-sm btn-primary';
+              b.innerHTML = '<i class="bi bi-stop-fill me-1"></i>End';
+              b.onclick = () => endService(t.id);
+              tdActions.appendChild(b);
+            }
+            tbody.appendChild(tr);
+          }
+        }
+        host.appendChild(col);
+      }
+    }
+
+    async function fetchTokens() {
+      const res = await fetch('/api/tokens_by_doctor');
+      if (res.ok) {
+        const data = await res.json();
+        renderDashboards(data);
+      }
+    }
+
+    async function fetchFatigue() {
+      const res = await fetch('/api/fatigue');
+      if (!res.ok) return;
+      const rows = await res.json();
+      fatigueMap = {};
+      for (const r of rows) {
+        fatigueMap[String(r.doctor_id)] = r;
+      }
+    }
+
+    async function startService(id) {
+      await fetch(`/start/${id}`, {method: 'POST'});
+      fetchTokens();
+    }
+
+    let endTokenId = null;
+
+    async function endService(id) {
+      endTokenId = id;
+      const modalEl = document.getElementById('endModal');
+      const followCb = document.getElementById('followup_required');
+      const reportCb = document.getElementById('reports_review_required');
+      if (followCb) followCb.checked = false;
+      if (reportCb) reportCb.checked = false;
+      if (modalEl && window.bootstrap) {
+        const m = new bootstrap.Modal(modalEl);
+        m.show();
+      } else {
+        // fallback: end directly
+        await fetch(`/end/${id}`, {method: 'POST'});
+        fetchTokens();
+      }
+    }
+
+    async function confirmEndToken() {
+      if (!endTokenId) return;
+      await fetch(`/end/${endTokenId}`, {method: 'POST'});
+      endTokenId = null;
+      fetchTokens();
+    }
+
+    if (window.EventSource) {
+      const es = new EventSource('/stream');
+      es.onmessage = async () => { await fetchFatigue(); fetchTokens(); };
+    }
+
+    (async () => {
+      await fetchFatigue();
+      fetchTokens();
+    })();
+  </script>
+
+  <div class="modal fade" id="endModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content" style="background: rgba(15, 15, 35, 0.98); border: 1px solid rgba(255,255,255,0.12);">
+        <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.10);">
+          <h5 class="modal-title">Close Token</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="small text-muted">Only Admin can mark Follow-Up / Reports Review required after completion.</div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid rgba(255,255,255,0.10);">
+          <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="confirmEndToken()">End Token</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

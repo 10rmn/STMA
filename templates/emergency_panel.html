@@ -1,0 +1,269 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <div class="stma-title h4 mb-0">Emergency Triage Panel</div>
+    <div class="stma-soft small">Emergency cases run outside the OPD token system</div>
+  </div>
+  <div class="d-flex gap-2">
+    {% if session.get('role') == 'Manager' %}
+      <button class="btn btn-sm btn-outline-danger" id="btn-surge-on" type="button">Activate Surge</button>
+      <button class="btn btn-sm btn-outline-light" id="btn-surge-off" type="button">Deactivate Surge</button>
+    {% endif %}
+    <button class="btn btn-sm btn-outline-light" id="btn-refresh" type="button"><i class="bi bi-arrow-repeat me-1"></i>Refresh</button>
+  </div>
+</div>
+
+<div class="alert alert-danger d-none" id="em-alert"></div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-5">
+    <div class="stma-card p-3">
+      <div class="fw-bold mb-2">Register Emergency Case</div>
+      <form id="em-form">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Patient Name</label>
+          <input class="form-control" name="patient_name" required placeholder="Enter patient name" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Triage Level</label>
+          <select class="form-select" name="triage_level" required>
+            <option value="1">1 — Critical (Immediate)</option>
+            <option value="2">2 — Very Urgent</option>
+            <option value="3" selected>3 — Urgent</option>
+            <option value="4">4 — Semi-Urgent</option>
+            <option value="5">5 — Non-Urgent</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Notes (optional)</label>
+          <textarea class="form-control" name="notes" rows="3" placeholder="Vitals, complaint, brief triage notes"></textarea>
+        </div>
+        <button class="btn btn-danger w-100" type="submit"><i class="bi bi-exclamation-triangle me-1"></i>Create Emergency Case</button>
+      </form>
+      <div class="alert alert-success mt-3 d-none" id="em-ok"></div>
+      <div class="alert alert-danger mt-3 d-none" id="em-err"></div>
+
+      <div class="mt-3 small text-muted">
+        Rules:
+        <div>- Triage 1 tries immediate assignment.</div>
+        <div>- If no emergency doctor available, case stays ACTIVE but unassigned (overload).</div>
+        <div>- Only Manager can change triage level after creation.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-7">
+    <div class="stma-card p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div class="fw-bold">Active Emergency Cases</div>
+        <div class="small text-muted" id="em-state">Surge: -</div>
+      </div>
+      <div class="table-responsive mt-3">
+        <table class="table table-dark table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Triage</th>
+              <th>Doctor</th>
+              <th>Since</th>
+              <th style="width: 180px;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="em-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function showMsg(id, txt) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = txt || '';
+    el.classList.toggle('d-none', !txt);
+  }
+
+  function triageBadge(level) {
+    const lv = Number(level || 0);
+    if (lv === 1) return '<span class="badge text-bg-danger">T1</span>';
+    if (lv === 2) return '<span class="badge" style="background:#e67e22;">T2</span>';
+    if (lv === 3) return '<span class="badge text-bg-warning">T3</span>';
+    if (lv === 4) return '<span class="badge text-bg-info">T4</span>';
+    return '<span class="badge text-bg-secondary">T5</span>';
+  }
+
+  function minsSince(iso) {
+    if (!iso) return '-';
+    try {
+      const d = new Date(iso);
+      const m = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+      return `${m} min`;
+    } catch (e) {
+      return '-';
+    }
+  }
+
+  function renderCases(payload) {
+    const tbody = document.getElementById('em-tbody');
+    tbody.innerHTML = '';
+
+    const state = payload?.state || {};
+    const surgeTxt = state?.surge_active ? `ON (Doctor ID: ${state?.surge_doctor_id ?? '-'})` : 'OFF';
+    document.getElementById('em-state').textContent = `Surge: ${surgeTxt}`;
+
+    const cases = payload?.cases || [];
+    if (!cases.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="5" class="text-muted">No active emergency cases.</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+
+    for (const c of cases) {
+      const tr = document.createElement('tr');
+      const doctor = c.doctor_name || (c.assigned_doctor_id ? `Doctor #${c.assigned_doctor_id}` : 'Unassigned');
+      const overload = !c.assigned_doctor_id;
+      tr.innerHTML = `
+        <td>
+          <div class="fw-semibold">${c.patient_name}</div>
+          <div class="small text-muted">${(c.notes || '').slice(0, 48)}</div>
+        </td>
+        <td>${triageBadge(c.triage_level)}</td>
+        <td>${overload ? '<span class="text-danger fw-bold">UNASSIGNED</span>' : doctor}</td>
+        <td>${minsSince(c.started_at)}</td>
+        <td>
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-sm btn-outline-success" data-close="COMPLETED" data-id="${c.id}">Complete</button>
+            <button class="btn btn-sm btn-outline-warning" data-close="TRANSFERRED" data-id="${c.id}">Transfer</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    const anyOverload = cases.some(x => !x.assigned_doctor_id);
+    showMsg('em-alert', anyOverload ? 'EMERGENCY OVERLOAD: Some cases are ACTIVE but unassigned. Consider Surge Mode.' : '');
+  }
+
+  async function refresh() {
+    showMsg('em-err', '');
+    const res = await fetch('/api/emergency/active', {
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    const raw = await res.text();
+    if (!res.ok) {
+      showMsg('em-err', raw || 'Failed to load emergency cases.');
+      return;
+    }
+    let payload = {};
+    try { payload = raw ? JSON.parse(raw) : {}; } catch (e) { payload = {}; }
+    renderCases(payload);
+  }
+
+  document.getElementById('em-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    showMsg('em-ok', '');
+    showMsg('em-err', '');
+
+    const form = new FormData(e.target);
+    const res = await fetch('/emergency/create', {
+      method: 'POST',
+      body: form,
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    const raw = await res.text();
+    let payload = {};
+    try { payload = raw ? JSON.parse(raw) : {}; } catch (e2) { payload = {}; }
+    if (!res.ok) {
+      showMsg('em-err', payload?.error || raw || 'Failed to create emergency case.');
+      return;
+    }
+    showMsg('em-ok', 'Emergency case created.');
+    e.target.reset();
+    await refresh();
+  });
+
+  document.getElementById('em-tbody').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const id = btn.getAttribute('data-id');
+    const st = btn.getAttribute('data-close');
+    if (!id || !st) return;
+
+    const fd = new FormData();
+    fd.set('status', st);
+    const res = await fetch(`/emergency/close/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      body: fd,
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    const raw = await res.text();
+    if (!res.ok) {
+      showMsg('em-err', raw || 'Failed to close case.');
+      return;
+    }
+    await refresh();
+  });
+
+  document.getElementById('btn-refresh').addEventListener('click', refresh);
+
+  const surgeOn = document.getElementById('btn-surge-on');
+  if (surgeOn) {
+    surgeOn.addEventListener('click', async () => {
+      const res = await fetch('/emergency/surge/activate', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      });
+      const raw = await res.text();
+      if (!res.ok) {
+        showMsg('em-err', raw || 'Failed to activate surge.');
+        return;
+      }
+      await refresh();
+    });
+  }
+
+  const surgeOff = document.getElementById('btn-surge-off');
+  if (surgeOff) {
+    surgeOff.addEventListener('click', async () => {
+      const res = await fetch('/emergency/surge/deactivate', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      });
+      const raw = await res.text();
+      if (!res.ok) {
+        showMsg('em-err', raw || 'Failed to deactivate surge.');
+        return;
+      }
+      await refresh();
+    });
+  }
+
+  if (window.EventSource) {
+    const es = new EventSource('/stream');
+    es.onmessage = () => {
+      refresh();
+    };
+  }
+
+  refresh();
+</script>
+{% endblock %}

@@ -1,0 +1,510 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <div class="stma-title h4 mb-0">{{ _('admin_intelligence_dashboard') }}</div>
+      <div class="stma-soft small">Real-time queue analytics, SLA monitoring, and performance insights</div>
+    </div>
+  </div>
+
+  <div class="row mb-3">
+    <div class="col-md-6">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div class="small text-muted">Estimated Waiting Time</div>
+            <div class="fw-semibold">Estimated average waiting time</div>
+          </div>
+          <i class="bi bi-clock fs-3 text-primary"></i>
+        </div>
+        <div class="fs-4" id="estimated-avg-wait">-</div>
+        <div class="small text-muted">Heuristic based on completed token service durations. In production, this can be replaced with ML-based prediction.</div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div class="small text-muted">Queue Health Score</div>
+            <div class="fw-semibold">Real-time (0–100)</div>
+          </div>
+          <span class="badge bg-dark px-3 py-2" id="qh-score">-</span>
+        </div>
+        <div class="mt-2 d-flex justify-content-center">
+          <div id="qh-gauge" style="width: 160px; height: 160px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: conic-gradient(#27ae60 0deg, #27ae60 0deg, rgba(255,255,255,0.10) 0deg);"></div>
+        </div>
+        <div class="small text-muted text-center mt-2">7-day trend</div>
+        <canvas id="qhTrend" height="90"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <div class="stma-card p-3" id="high-risk-banner" style="display:none;">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div class="small text-muted">High-Risk Alert</div>
+            <div class="fw-semibold" id="high-risk-text">-</div>
+          </div>
+          <i class="bi bi-exclamation-triangle-fill fs-3 text-warning"></i>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <div class="fw-semibold">Risk Distribution</div>
+          <span class="badge text-bg-primary-subtle">Today</span>
+        </div>
+        <canvas id="riskDist" height="140"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div class="small text-muted">{{ _('operational_health_score') }}</div>
+            <div class="fw-semibold">{{ _('today') }}</div>
+          </div>
+          <span class="badge bg-dark px-3 py-2" id="op-score">{{ analytics.op_score }}/100</span>
+        </div>
+        <div class="mt-2" id="smart-insights">
+          {% if analytics.insights %}
+            {% for t in analytics.insights %}
+              <div class="d-flex align-items-start gap-2 small">
+                <span class="text-primary"><i class="bi bi-lightning-charge-fill"></i></span>
+                <span>{{ t }}</span>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="small text-muted">No insights yet. Generate and process a few tokens to see intelligence insights.</div>
+          {% endif %}
+        </div>
+        <div class="mt-3" id="staff-reco-area">
+          {% if analytics.staff_reco %}
+            <div class="alert alert-warning mb-0" id="staff-reco">{{ analytics.staff_reco }}</div>
+          {% else %}
+            <div id="staff-reco" class="d-none"></div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="mt-3" id="sla-reco-area">
+        <div class="stma-card p-3" id="sla-banner">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="small text-muted">SLA Status</div>
+              <div class="fw-semibold" id="sla-title">-</div>
+              <div class="small" id="sla-recommendation"></div>
+            </div>
+            <i class="bi bi-shield-check fs-3" id="sla-icon"></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-3">
+        <div class="stma-card p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="fw-semibold"><i class="bi bi-person-lines-fill me-1"></i>Doctor Queue Metrics</div>
+            <span class="badge text-bg-primary-subtle">SLA: {{ waiting_sla }} min</span>
+          </div>
+          <div id="doctor-stats-area"></div>
+        </div>
+      </div>
+
+      {% if analytics.any_department_sla_breach %}
+      <div class="mt-3">
+        <div class="stma-card p-3 border border-danger">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="small text-muted">SLA Breach Detected</div>
+              <div class="fw-semibold">One or more departments exceed SLA thresholds</div>
+            </div>
+            <i class="bi bi-exclamation-triangle-fill fs-3 text-danger"></i>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    <div class="col-md-4">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <div class="fw-semibold">{{ _('hourly_traffic') }}</div>
+          <span class="badge text-bg-primary-subtle">{{ _('today') }}</span>
+        </div>
+        <canvas id="hourlyChart" height="140"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-3">
+    <div class="col-md-4">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div class="small text-muted">{{ _('total_tokens') }}</div>
+            <div class="fw-semibold">{{ _('today') }}</div>
+          </div>
+          <i class="bi bi-hash fs-4 text-primary"></i>
+        </div>
+        <div class="fs-4" id="total-today">{{ total_today }}</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div class="small text-muted">Avg waiting</div>
+            <div class="fw-semibold">Minutes</div>
+          </div>
+          <i class="bi bi-hourglass-split fs-4 text-primary"></i>
+        </div>
+        <div class="fs-4" id="avg-wait">{{ avg_wait if avg_wait is not none else '-' }}</div>
+        <div class="small" id="sla-wait">SLA: {{ analytics.sla_wait_threshold }} min</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <div class="small text-muted">Avg service</div>
+            <div class="fw-semibold">Minutes</div>
+          </div>
+          <i class="bi bi-stopwatch fs-4 text-primary"></i>
+        </div>
+        <div class="fs-4" id="avg-service">{{ avg_service if avg_service is not none else '-' }}</div>
+        <div class="small" id="sla-service">SLA: {{ analytics.sla_service_threshold }} min</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>SLA Violations</div>
+          <span class="badge text-bg-danger-subtle">Waiting</span>
+        </div>
+        <div id="anomalies-area"></div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>SLA Violations</div>
+          <span class="badge text-bg-danger-subtle">Service</span>
+        </div>
+        <div id="service-violations-area"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mt-3">
+    <div class="col-lg-6">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-semibold"><i class="bi bi-trophy me-1"></i>Service Efficiency</div>
+          <span class="badge text-bg-success-subtle">Ranking</span>
+        </div>
+        <div id="service-ranking-area"></div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="stma-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-semibold"><i class="bi bi-person-check me-1"></i>Agent Performance</div>
+          <span class="badge text-bg-info-subtle">Tokens/hour</span>
+        </div>
+        <div id="agent-ranking-area"></div>
+        <div class="mt-3" id="agent-performance-area"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    let hourlyChart;
+    let qhTrendChart;
+    let riskDistChart;
+
+    function renderQueueHealth(payload) {
+      const score = payload.queue_health_score;
+      const badge = document.getElementById('qh-score');
+      const gauge = document.getElementById('qh-gauge');
+      if (badge) badge.textContent = score === null || score === undefined ? '-' : `${score}/100`;
+      if (gauge) {
+        const s = (score === null || score === undefined) ? 0 : Math.max(0, Math.min(100, score));
+        const deg = (s / 100) * 360;
+        let color = '#27ae60';
+        if (s < 60) color = '#e74c3c';
+        else if (s < 80) color = '#f1c40f';
+        gauge.style.background = `conic-gradient(${color} 0deg, ${color} ${deg}deg, rgba(255,255,255,0.10) ${deg}deg)`;
+        gauge.innerHTML = `<div style="text-align:center;"><div class="stma-title" style="font-size: 2rem;">${s}</div><div class="small text-muted">Health</div></div>`;
+      }
+
+      const trend = payload.queue_health_trend || [];
+      const labels = trend.map(x => x.day.slice(5));
+      const values = trend.map(x => x.score);
+      const ctx = document.getElementById('qhTrend');
+      if (ctx) {
+        if (!qhTrendChart) {
+          qhTrendChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets: [{ label: 'Health', data: values, borderColor: 'rgba(46,204,113,0.9)', backgroundColor: 'rgba(46,204,113,0.15)', tension: 0.3, fill: true }] },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+          });
+        } else {
+          qhTrendChart.data.labels = labels;
+          qhTrendChart.data.datasets[0].data = values;
+          qhTrendChart.update();
+        }
+      }
+    }
+
+    function renderDoctorStats(payload) {
+      const area = document.getElementById('doctor-stats-area');
+      if (!area) return;
+      const rows = payload.doctor_stats || [];
+      if (!rows.length) {
+        area.innerHTML = '<div class="alert alert-secondary mb-0">No active doctors configured.</div>';
+        return;
+      }
+
+      let html = '<div class="table-responsive">';
+      html += '<table class="table table-sm align-middle mb-0">';
+      html += '<thead><tr><th>Doctor</th><th>Queue</th><th>Avg wait (min)</th><th>SLA</th><th>Overload</th><th>Fatigue</th><th>Recommendation</th></tr></thead><tbody>';
+      for (const d of rows) {
+        const breach = !!d.sla_breach;
+        const overload = !!d.overload;
+        const cls = breach || overload ? 'table-danger' : '';
+        const slaText = breach ? `SLA Breach detected for Dr. ${d.doctor_name}` : 'OK';
+        const avgWait = (d.avg_wait_min === null || d.avg_wait_min === undefined) ? '-' : d.avg_wait_min;
+        const overloadBadge = overload ? '<span class="badge text-bg-danger">Yes</span>' : '<span class="badge text-bg-success">No</span>';
+        const fatigue = d.fatigue_risk ? `<span class="badge text-bg-warning">Risk</span><div class="small text-muted">${d.fatigue_reason || ''}</div>` : '<span class="badge text-bg-success">OK</span>';
+        const rec = d.recommendation ? d.recommendation : '-';
+        html += `<tr class="${cls}">`;
+        html += `<td class="fw-semibold">${d.doctor_name}</td>`;
+        html += `<td>${d.queue_len}</td>`;
+        html += `<td>${avgWait}</td>`;
+        html += `<td>${slaText}</td>`;
+        html += `<td>${overloadBadge}</td>`;
+        html += `<td>${fatigue}</td>`;
+        html += `<td class="small">${rec}</td>`;
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+      area.innerHTML = html;
+    }
+
+    function renderWaitViolations(payload) {
+      const area = document.getElementById('anomalies-area');
+      if (payload.wait_violations && payload.wait_violations.length) {
+        let html = '<table class="table table-bordered"><thead><tr><th>Token</th><th>Service</th><th>Waiting (min)</th><th>Recommendation</th></tr></thead><tbody>';
+        for (const a of payload.wait_violations) {
+          html += `<tr class="table-danger"><td>${a.token}</td><td>${a.service}</td><td>${a.wait_min}</td><td>Review staffing / counter allocation for this service.</td></tr>`;
+        }
+        html += '</tbody></table>';
+        area.innerHTML = html;
+      } else {
+        area.innerHTML = '<div class="alert alert-secondary">No waiting-time SLA violations today.</div>';
+      }
+    }
+
+    function renderServiceViolations(payload) {
+      const area = document.getElementById('service-violations-area');
+      if (payload.service_violations && payload.service_violations.length) {
+        let html = '<table class="table table-bordered"><thead><tr><th>Token</th><th>Service</th><th>Service (min)</th><th>Recommendation</th></tr></thead><tbody>';
+        for (const a of payload.service_violations) {
+          html += `<tr class="table-danger"><td>${a.token}</td><td>${a.service}</td><td>${a.service_min}</td><td>Investigate bottleneck steps; consider dedicated lane.</td></tr>`;
+        }
+        html += '</tbody></table>';
+        area.innerHTML = html;
+      } else {
+        area.innerHTML = '<div class="alert alert-secondary">No service-time SLA violations today.</div>';
+      }
+    }
+
+    function renderRankings(payload) {
+      const svcArea = document.getElementById('service-ranking-area');
+      if (payload.service_ranking && payload.service_ranking.length) {
+        let html = '<table class="table table-sm table-striped"><thead><tr><th>Rank</th><th>Service</th><th>Avg service (min)</th><th>Completed</th></tr></thead><tbody>';
+        payload.service_ranking.forEach((r, idx) => {
+          const cls = idx === 0 ? 'table-success' : (idx === payload.service_ranking.length - 1 ? 'table-warning' : '');
+          html += `<tr class="${cls}"><td>${idx + 1}</td><td>${r.service_name}</td><td>${r.avg_service_min}</td><td>${r.completed}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        svcArea.innerHTML = html;
+      } else {
+        svcArea.innerHTML = '<div class="alert alert-secondary">Not enough completed tokens to rank services yet.</div>';
+      }
+
+      const agentArea = document.getElementById('agent-ranking-area');
+      if (payload.agent_ranking && payload.agent_ranking.length) {
+        let html = '<table class="table table-sm table-striped"><thead><tr><th>Rank</th><th>Agent</th><th>Tokens/hour</th><th>Completed</th></tr></thead><tbody>';
+        payload.agent_ranking.forEach((r, idx) => {
+          const cls = idx === 0 ? 'table-success' : (idx === payload.agent_ranking.length - 1 ? 'table-warning' : '');
+          html += `<tr class="${cls}"><td>${idx + 1}</td><td>${r.agent}</td><td>${r.tokens_per_hour}</td><td>${r.tokens_completed}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        agentArea.innerHTML = html;
+      } else {
+        agentArea.innerHTML = '<div class="alert alert-secondary">No agent performance data yet (requires completed tokens).</div>';
+      }
+
+      const perfArea = document.getElementById('agent-performance-area');
+      const perf = payload.agent_performance || [];
+      if (!perfArea) return;
+      if (!perf.length) {
+        perfArea.innerHTML = '';
+        return;
+      }
+
+      const top = payload.top_agents || [];
+      const risk = payload.at_risk_agents || [];
+      let panel = '';
+
+      if (risk.length) {
+        panel += `<div class="alert alert-warning mb-2"><div class="fw-semibold">At-risk agents</div><div class="small">${risk.slice(0,3).map(a => `${a.agent} (${a.efficiency_score})`).join(', ')}</div></div>`;
+      }
+
+      panel += '<div class="fw-semibold mb-2">Efficiency Leaderboard</div>';
+      panel += '<div class="table-responsive">';
+      panel += '<table class="table table-sm align-middle mb-0">';
+      panel += '<thead><tr><th>Agent</th><th>Served</th><th>Avg service</th><th>SLA %</th><th>Avg risk</th><th>Score</th><th>Tier</th></tr></thead><tbody>';
+      for (const a of top.length ? top : perf.slice(0,3)) {
+        const fatigue = a.fatigue_warning ? '<span class="badge text-bg-warning ms-1">FATIGUE</span>' : '';
+        panel += `<tr><td class="fw-semibold">${a.agent}${fatigue}</td><td>${a.served}</td><td>${a.avg_service_min ?? '-'}</td><td>${a.sla_compliance_pct}%</td><td>${a.avg_risk_handled}</td><td><span class="badge bg-dark">${a.efficiency_score}</span></td><td>${a.tier}</td></tr>`;
+      }
+      panel += '</tbody></table></div>';
+      perfArea.innerHTML = panel;
+    }
+
+    function renderInsights(payload) {
+      document.getElementById('op-score').textContent = `${payload.op_score}/100`;
+      const insightsArea = document.getElementById('smart-insights');
+      if (payload.insights && payload.insights.length) {
+        insightsArea.innerHTML = payload.insights.map(t => `<div class="small">${t}</div>`).join('');
+      } else {
+        insightsArea.innerHTML = '<div class="small text-muted">No insights yet.</div>';
+      }
+
+      const reco = document.getElementById('staff-reco');
+      if (payload.staff_reco) {
+        reco.className = 'alert alert-warning mb-0';
+        reco.textContent = payload.staff_reco;
+      } else {
+        reco.className = 'd-none';
+        reco.textContent = '';
+      }
+    }
+
+    function renderHourlyChart(payload) {
+      const labels = payload.hourly_counts.map(x => `${String(x.hour).padStart(2,'0')}:00`);
+      const values = payload.hourly_counts.map(x => x.count);
+      const ctx = document.getElementById('hourlyChart');
+      if (!hourlyChart) {
+        hourlyChart = new Chart(ctx, {
+          type: 'bar',
+          data: { labels, datasets: [{ label: 'Tokens generated', data: values, backgroundColor: 'rgba(13,110,253,0.6)' }] },
+          options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxRotation: 90, minRotation: 90 } }, y: { beginAtZero: true } } }
+        });
+      } else {
+        hourlyChart.data.labels = labels;
+        hourlyChart.data.datasets[0].data = values;
+        hourlyChart.update();
+      }
+    }
+
+    function renderDashboard(payload) {
+      document.getElementById('total-today').textContent = payload.total_today;
+      document.getElementById('avg-wait').textContent = payload.avg_wait === null ? '-' : payload.avg_wait;
+      document.getElementById('avg-service').textContent = payload.avg_service === null ? '-' : payload.avg_service;
+      document.getElementById('sla-wait').textContent = `SLA: ${payload.sla_wait_threshold} min`;
+      document.getElementById('sla-service').textContent = `SLA: ${payload.sla_service_threshold} min`;
+
+      const eta = document.getElementById('estimated-avg-wait');
+      eta.textContent = payload.estimated_avg_wait_min === null ? '-' : `${payload.estimated_avg_wait_min} minutes`;
+
+      const sla = payload.sla_status;
+      const banner = document.getElementById('sla-banner');
+      const title = document.getElementById('sla-title');
+      const rec = document.getElementById('sla-recommendation');
+      const icon = document.getElementById('sla-icon');
+      if (sla && sla.breach) {
+        banner.className = 'stma-card p-3 border border-danger';
+        title.textContent = sla.title;
+        rec.textContent = sla.recommendation || '';
+        icon.className = 'bi bi-shield-x fs-3 text-danger';
+      } else {
+        banner.className = 'stma-card p-3 border border-success';
+        title.textContent = sla ? sla.title : 'All services operating within SLA compliance.';
+        rec.textContent = '';
+        icon.className = 'bi bi-shield-check fs-3 text-success';
+      }
+
+      renderInsights(payload);
+      renderWaitViolations(payload);
+      renderServiceViolations(payload);
+      renderRankings(payload);
+      renderHourlyChart(payload);
+      renderDoctorStats(payload);
+      renderQueueHealth(payload);
+
+      const hr = payload.high_risk_waiting || 0;
+      const hrEl = document.getElementById('high-risk-banner');
+      const hrText = document.getElementById('high-risk-text');
+      if (hrEl && hrText) {
+        if (hr > 0) {
+          hrEl.style.display = '';
+          hrText.textContent = `${hr} high-risk patient(s) waiting (risk ≥ 80)`;
+        } else {
+          hrEl.style.display = 'none';
+        }
+      }
+
+      const dist = payload.risk_distribution || {};
+      const labels = ['Emergency', 'Chronic Illness', 'Senior Citizen', 'Regular'];
+      const vals = labels.map(k => dist[k] || 0);
+      const ctx = document.getElementById('riskDist');
+      if (ctx) {
+        if (!riskDistChart) {
+          riskDistChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+              labels,
+              datasets: [{
+                data: vals,
+                backgroundColor: ['#e74c3c', '#f39c12', '#3498db', 'rgba(255,255,255,0.35)'],
+                borderWidth: 0,
+              }]
+            },
+            options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#ddd' } } } }
+          });
+        } else {
+          riskDistChart.data.datasets[0].data = vals;
+          riskDistChart.update();
+        }
+      }
+    }
+
+    async function fetchDashboard() {
+      const res = await fetch('/api/advanced_dashboard');
+      if (res.ok) {
+        const data = await res.json();
+        renderDashboard(data);
+      }
+    }
+
+    fetchDashboard();
+    if (window.EventSource) {
+      const es = new EventSource('/stream');
+      es.onmessage = () => { fetchDashboard(); };
+    }
+  </script>
+
+{% endblock %}
+

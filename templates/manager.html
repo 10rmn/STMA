@@ -1,0 +1,188 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <div class="stma-title h4 mb-0">Manager Panel</div>
+    <div class="stma-soft small">SLA breach alerts and smart reassignment recommendations</div>
+  </div>
+  <div>
+    <a class="btn btn-outline-info" href="/simulation"><i class="bi bi-bezier2 me-1"></i>Simulation Lab</a>
+  </div>
+</div>
+
+<!-- Department SLA Overview -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="stma-card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold"><i class="bi bi-building me-1"></i>Department SLA Status</div>
+        <span class="badge text-bg-primary-subtle">Real-time</span>
+      </div>
+      <div id="department-sla-area"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Manager Recommendations -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="stma-card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold"><i class="bi bi-lightning-charge-fill me-1"></i>Smart Reassignment Recommendations</div>
+        <span class="badge text-bg-warning-subtle" id="reco-count">0</span>
+      </div>
+      <div id="recommendations-area"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Doctor Overload Overview -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="stma-card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>Doctor Overload Status</div>
+        <span class="badge text-bg-danger-subtle">SLA: {{ analytics.sla_wait_threshold }} min</span>
+      </div>
+      <div id="doctor-overload-area"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Audit Log -->
+<div class="row">
+  <div class="col-md-12">
+    <div class="stma-card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold"><i class="bi bi-clock-history me-1"></i>Audit Log</div>
+        <span class="badge text-bg-secondary-subtle">Recent actions</span>
+      </div>
+      <div id="audit-log-area"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function renderDepartmentSLA(payload) {
+    const area = document.getElementById('department-sla-area');
+    if (!area) return;
+    const depts = payload.department_stats || [];
+    if (!depts.length) {
+      area.innerHTML = '<div class="alert alert-secondary mb-0">No department data available.</div>';
+      return;
+    }
+    let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Department</th><th>SLA (min)</th><th>Est. Wait (min)</th><th>Status</th></tr></thead><tbody>';
+    for (const d of depts) {
+      const breach = !!d.breach;
+      const cls = breach ? 'table-danger' : '';
+      const status = breach ? `SLA Breach (${d.estimated_wait_min} > ${d.sla_min})` : 'OK';
+      html += `<tr class="${cls}"><td>${d.department_name}</td><td>${d.sla_min}</td><td>${d.estimated_wait_min || '-'}</td><td>${status}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    area.innerHTML = html;
+  }
+
+  function renderRecommendations(payload) {
+    const area = document.getElementById('recommendations-area');
+    const badge = document.getElementById('reco-count');
+    const recs = payload.manager_recommendations || [];
+    badge.textContent = recs.length;
+    if (!recs.length) {
+      area.innerHTML = '<div class="alert alert-success mb-0">No reassignments needed at this time.</div>';
+      return;
+    }
+    let html = '';
+    for (const r of recs) {
+      html += '<div class="alert alert-warning d-flex justify-content-between align-items-start" style="gap:1rem;">';
+      html += `<div><strong>Reassign next token</strong> from Dr. ${r.from_doctor} to Dr. ${r.to_doctor_name}<br><small class="text-muted">Token: ${r.affected_token_number || 'N/A'}</small></div>`;
+      html += '<div>';
+      html += `<button class="btn btn-sm btn-success" onclick="approveReassign(${r.affected_token_id}, ${r.to_doctor})">Approve</button>`;
+      html += `<button class="btn btn-sm btn-outline-secondary ms-1" onclick="ignoreReassign(${r.affected_token_id})">Ignore</button>`;
+      html += '</div>';
+      html += '</div>';
+    }
+    area.innerHTML = html;
+  }
+
+  function renderDoctorOverload(payload) {
+    const area = document.getElementById('doctor-overload-area');
+    const doctors = payload.doctor_stats || [];
+    if (!doctors.length) {
+      area.innerHTML = '<div class="alert alert-secondary mb-0">No active doctors.</div>';
+      return;
+    }
+    let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Doctor</th><th>Queue</th><th>Avg Wait (min)</th><th>SLA</th><th>Overload</th></tr></thead><tbody>';
+    for (const d of doctors) {
+      const overload = !!d.overload;
+      const cls = overload ? 'table-danger' : '';
+      const overloadText = overload ? 'Yes' : 'No';
+      const avgWait = (d.avg_wait_min === null || d.avg_wait_min === undefined) ? '-' : d.avg_wait_min;
+      html += `<tr class="${cls}"><td>${d.doctor_name}</td><td>${d.queue_len}</td><td>${avgWait}</td><td>${d.sla_min}</td><td><span class="badge ${overload ? 'text-bg-danger' : 'text-bg-success'}">${overloadText}</span></td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    area.innerHTML = html;
+  }
+
+  async function renderAuditLog() {
+    const area = document.getElementById('audit-log-area');
+    if (!area) return;
+    const res = await fetch('/api/audit_logs');
+    if (!res.ok) return;
+    const logs = await res.json();
+    if (!logs.length) {
+      area.innerHTML = '<div class="alert alert-secondary mb-0">No audit events yet.</div>';
+      return;
+    }
+    let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Time</th><th>Type</th><th>Details</th></tr></thead><tbody>';
+    for (const l of logs) {
+      const time = new Date(l.created_at).toLocaleString();
+      html += `<tr><td class="small text-muted">${time}</td><td><span class="badge text-bg-info">${l.event_type}</span></td><td class="small">${l.details}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    area.innerHTML = html;
+  }
+
+  async function approveReassign(tokenId, toDoctorId) {
+    const res = await fetch('/api/manager/approve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token_id: tokenId, to_doctor_id: toDoctorId}),
+    });
+    if (res.ok) {
+      fetchManager();
+    } else {
+      alert('Failed to approve reassignment');
+    }
+  }
+
+  async function ignoreReassign(tokenId) {
+    const res = await fetch('/api/manager/ignore', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token_id: tokenId}),
+    });
+    if (res.ok) {
+      fetchManager();
+    } else {
+      alert('Failed to ignore recommendation');
+    }
+  }
+
+  async function fetchManager() {
+    const res = await fetch('/api/manager');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderDepartmentSLA(data);
+    renderRecommendations(data);
+    renderDoctorOverload(data);
+    renderAuditLog();
+  }
+
+  fetchManager();
+  if (window.EventSource) {
+    const es = new EventSource('/stream');
+    es.onmessage = () => { fetchManager(); };
+  }
+</script>
+{% endblock %}

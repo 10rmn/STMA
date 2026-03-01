@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <div class="stma-title h4 mb-0">{{ _('users') }}</div>
+      <div class="stma-soft small">Manage login accounts and roles</div>
+    </div>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="row">
+    <div class="col-lg-7">
+      <div class="stma-card p-3">
+        <div class="fw-semibold mb-2">Existing Users</div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u in users %}
+                <tr>
+                  <td>{{ u.username }}</td>
+                  <td><span class="badge bg-secondary">{{ u.role }}</span></td>
+                  <td>
+                    {% if u.id != session.user_id %}
+                      <form method="post" class="d-inline" onsubmit="return confirm('Delete user {{ u.username }}?');">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                      </form>
+                    {% else %}
+                      <span class="text-muted small">You</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="3" class="text-muted">No users found.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="stma-card p-3">
+        <div class="fw-semibold mb-2">Add New User</div>
+        <form method="post" autocomplete="off">
+          <input type="hidden" name="action" value="add">
+          <div class="mb-2">
+            <label class="form-label small">Username</label>
+            <input type="text" name="username" class="form-control form-control-sm" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Password</label>
+            <input type="password" name="password" class="form-control form-control-sm" required>
+            <div class="form-text small">At least 8 characters, mixed case, one digit.</div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Role</label>
+            <select name="role" class="form-select form-select-sm" required>
+              <option value="">Select role</option>
+              <option value="Admin">Admin</option>
+              <option value="Receptionist">Receptionist</option>
+              <option value="Service">Service</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm w-100">Add User</button>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endblock %}

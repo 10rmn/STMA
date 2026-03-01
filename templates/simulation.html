@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <div class="stma-title h4 mb-0">Simulation Lab</div>
+    <div class="stma-soft small">In-memory simulation. No changes are written to the database.</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-lg-5">
+    <div class="stma-card p-3">
+      <div class="fw-semibold mb-2"><i class="bi bi-sliders me-1"></i>Simulation Inputs</div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Increase patient load (%)</label>
+        <input type="range" class="form-range" min="0" max="100" value="10" id="load">
+        <div class="small text-muted">Value: <span id="loadVal">10</span>%</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Decrease active doctors (count)</label>
+        <input type="range" class="form-range" min="0" max="5" value="0" id="reduce">
+        <div class="small text-muted">Value: <span id="reduceVal">0</span></div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Increase emergency cases (%)</label>
+        <input type="range" class="form-range" min="0" max="50" value="5" id="emergency">
+        <div class="small text-muted">Value: <span id="emergencyVal">5</span>%</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Increase follow-up return rate (%)</label>
+        <input type="range" class="form-range" min="0" max="50" value="10" id="followup">
+        <div class="small text-muted">Value: <span id="followupVal">10</span>%</div>
+      </div>
+
+      <button class="btn btn-primary" onclick="runSim()"><i class="bi bi-play-fill me-1"></i>Run Simulation</button>
+      <a class="btn btn-outline-light ms-2" href="/manager"><i class="bi bi-arrow-left me-1"></i>Back</a>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="stma-card p-3 mb-3">
+      <div class="fw-semibold mb-2"><i class="bi bi-graph-up me-1"></i>Before vs After</div>
+      <div id="compareArea" class="small text-muted">Run a simulation to see results.</div>
+    </div>
+
+    <div class="stma-card p-3">
+      <div class="fw-semibold mb-2"><i class="bi bi-shield-exclamation me-1"></i>Risk & Recommendation</div>
+      <div id="riskArea" class="small text-muted">-</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function bindRange(id, outId) {
+    const el = document.getElementById(id);
+    const out = document.getElementById(outId);
+    const update = () => { out.textContent = el.value; };
+    el.addEventListener('input', update);
+    update();
+  }
+
+  bindRange('load', 'loadVal');
+  bindRange('reduce', 'reduceVal');
+  bindRange('emergency', 'emergencyVal');
+  bindRange('followup', 'followupVal');
+
+  async function runSim() {
+    const payload = {
+      load_increase_pct: parseFloat(document.getElementById('load').value),
+      reduce_doctors: parseInt(document.getElementById('reduce').value, 10),
+      emergency_pct: parseFloat(document.getElementById('emergency').value),
+      followup_return_pct: parseFloat(document.getElementById('followup').value),
+    };
+
+    const res = await fetch('/api/simulate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      document.getElementById('compareArea').textContent = 'Simulation failed.';
+      return;
+    }
+    const data = await res.json();
+
+    const b = data.before;
+    const a = data.after;
+    document.getElementById('compareArea').innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr><th></th><th>Before</th><th>After</th></tr></thead>
+          <tbody>
+            <tr><td class="fw-semibold">Queue length</td><td>${b.queue_len}</td><td>${a.queue_len}</td></tr>
+            <tr><td class="fw-semibold">Active doctors</td><td>${b.active_doctors}</td><td>${a.active_doctors}</td></tr>
+            <tr><td class="fw-semibold">Avg service (min)</td><td>${b.avg_service_min}</td><td>${b.avg_service_min}</td></tr>
+            <tr><td class="fw-semibold">Est. wait (min)</td><td>${b.estimated_wait_min}</td><td>${a.estimated_wait_min}</td></tr>
+            <tr><td class="fw-semibold">SLA breach prob</td><td>-</td><td>${a.sla_breach_probability_pct}%</td></tr>
+            <tr><td class="fw-semibold">Required doctors for SLA</td><td>-</td><td>${a.required_doctors_for_sla}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    const riskClass = data.risk === 'High' ? 'alert-danger' : (data.risk === 'Moderate' ? 'alert-warning' : 'alert-success');
+    document.getElementById('riskArea').innerHTML = `
+      <div class="alert ${riskClass} mb-0">
+        <div class="fw-semibold">Risk: ${data.risk}</div>
+        <div class="small">Load index: ${a.load_index}</div>
+        <div class="small">Recommended action: ${data.recommended_action}</div>
+      </div>
+    `;
+  }
+
+  runSim();
+</script>
+{% endblock %}

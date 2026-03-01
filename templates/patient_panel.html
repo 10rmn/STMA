@@ -1,0 +1,283 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+  .pp-card {
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.05);
+    box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+  }
+  .pp-step {
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(0,0,0,0.15);
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <div class="stma-title h4 mb-0">Patient Panel</div>
+    <div class="stma-soft small">Generate a Regular OPD token and track it in real time</div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="pp-card p-3">
+      <div class="fw-bold mb-2">Generate Token</div>
+      <div class="small text-muted mb-3">Emergency / Follow-Up options are not available for patient accounts.</div>
+
+      <form id="pt-form">
+        <div class="pp-step p-3 mb-3">
+          <div class="fw-semibold mb-2">Step 1: Select Department</div>
+          <select class="form-select" name="service" id="pt-service" required>
+            <option value="">Select department</option>
+            {% for d in departments %}
+              <option value="{{ d }}">{{ d }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="pp-step p-3 mb-3">
+          <div class="fw-semibold mb-2">Step 2: Preferred Doctor (optional)</div>
+          <select class="form-select" name="preferred_doctor_id" id="pt-doctor">
+            <option value="">Auto-assign best available</option>
+          </select>
+          <div class="small text-muted mt-2">If you select a doctor, your token goes to that doctor’s OPD queue (if active).</div>
+        </div>
+
+        <div class="pp-step p-3 mb-3">
+          <div class="fw-semibold mb-2">Step 3: Patient Name (optional)</div>
+          <input class="form-control" name="patient_name" id="pt-name" placeholder="Enter patient name" />
+        </div>
+
+        <button class="btn btn-primary w-100" type="submit"><i class="bi bi-plus-circle me-1"></i>Confirm & Generate Token</button>
+      </form>
+
+      <div class="alert alert-danger mt-3 d-none" id="pt-error"></div>
+      <div class="alert alert-success mt-3 d-none" id="pt-success"></div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="pp-card p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div class="fw-bold">My Tokens</div>
+        <button class="btn btn-sm btn-outline-light" id="pt-refresh" type="button"><i class="bi bi-arrow-repeat me-1"></i>Refresh</button>
+      </div>
+      <div class="small text-muted mt-1">Tap a token to view live status, queue position, and estimated start time.</div>
+
+      <div class="mt-3" id="pt-list"></div>
+
+      <div class="mt-3 pp-step p-3 d-none" id="pt-status">
+        <div class="fw-semibold">Live Status</div>
+        <div class="row g-2 mt-2">
+          <div class="col-12 col-md-6"><div class="small text-muted">Token</div><div class="fw-bold" id="st-token">-</div></div>
+          <div class="col-12 col-md-6"><div class="small text-muted">Department</div><div class="fw-bold" id="st-service">-</div></div>
+          <div class="col-12 col-md-6"><div class="small text-muted">Doctor</div><div class="fw-bold" id="st-doctor">-</div></div>
+          <div class="col-12 col-md-6"><div class="small text-muted">Status</div><div class="fw-bold" id="st-status">-</div></div>
+          <div class="col-12 col-md-6"><div class="small text-muted">Queue Position</div><div class="fw-bold" id="st-pos">-</div></div>
+          <div class="col-12 col-md-6"><div class="small text-muted">Estimated Start</div><div class="fw-bold" id="st-eta">-</div></div>
+        </div>
+        <div class="mt-3">
+          <div class="small text-muted">Now Serving (Doctor)</div>
+          <div class="fw-bold" id="st-now">-</div>
+        </div>
+        <div class="mt-3 d-flex gap-2">
+          <button class="btn btn-outline-warning" type="button" id="pt-cancel"><i class="bi bi-x-circle me-1"></i>Cancel (if waiting)</button>
+        </div>
+      </div>
+
+      <div class="alert alert-danger mt-3 d-none" id="st-error"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let selectedTokenId = null;
+
+  function showMsg(id, text) {
+    const el = document.getElementById(id);
+    el.textContent = text || '';
+    el.classList.toggle('d-none', !text);
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '-';
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return '-';
+    }
+  }
+
+  async function loadDoctors(service) {
+    const sel = document.getElementById('pt-doctor');
+    sel.innerHTML = '<option value="">Auto-assign best available</option>';
+    if (!service) return;
+    const res = await fetch(`/api/patient/doctors?service=${encodeURIComponent(service)}`, {
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    if (!res.ok) return;
+    const docs = await res.json();
+    for (const d of docs) {
+      const opt = document.createElement('option');
+      opt.value = String(d.id);
+      opt.textContent = d.name;
+      sel.appendChild(opt);
+    }
+  }
+
+  function renderTokenList(tokens) {
+    const host = document.getElementById('pt-list');
+    host.innerHTML = '';
+
+    if (!tokens || !tokens.length) {
+      const div = document.createElement('div');
+      div.className = 'small text-muted';
+      div.textContent = 'No tokens generated yet.';
+      host.appendChild(div);
+      return;
+    }
+
+    for (const t of tokens) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'w-100 text-start pp-step p-3 mb-2';
+      card.style.cursor = 'pointer';
+      card.onclick = () => {
+        selectedTokenId = t.id;
+        refreshStatus();
+      };
+      card.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center">
+          <div class="fw-bold">${t.token_number}</div>
+          <span class="badge text-bg-secondary">${t.status}</span>
+        </div>
+        <div class="small text-muted mt-1">${t.service_name} • ${t.doctor_name || 'Auto'} • ${new Date(t.generated_time).toLocaleString()}</div>
+      `;
+      host.appendChild(card);
+    }
+  }
+
+  async function refreshTokens() {
+    const res = await fetch('/api/patient/tokens', {
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    if (!res.ok) return;
+    const tokens = await res.json();
+    renderTokenList(tokens);
+  }
+
+  async function refreshStatus() {
+    if (!selectedTokenId) return;
+    const res = await fetch(`/api/patient/token_status?token_id=${selectedTokenId}`, {
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    if (!res.ok) {
+      showMsg('st-error', 'Unable to load token status.');
+      return;
+    }
+    showMsg('st-error', '');
+    const d = await res.json();
+    document.getElementById('pt-status').classList.remove('d-none');
+    document.getElementById('st-token').textContent = d.token_number || '-';
+    document.getElementById('st-service').textContent = d.service_name || '-';
+    document.getElementById('st-doctor').textContent = d.doctor_name || '-';
+    document.getElementById('st-status').textContent = d.status || '-';
+    document.getElementById('st-pos').textContent = (d.queue_position != null) ? String(d.queue_position) : '-';
+    document.getElementById('st-eta').textContent = fmtTime(d.estimated_start_time);
+    document.getElementById('st-now').textContent = d.now_serving?.token_number || '-';
+  }
+
+  document.getElementById('pt-service').addEventListener('change', async (e) => {
+    await loadDoctors(e.target.value);
+  });
+
+  document.getElementById('pt-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    showMsg('pt-error', '');
+    showMsg('pt-success', '');
+
+    const form = new FormData(e.target);
+    const res = await fetch('/patient/token', {
+      method: 'POST',
+      body: form,
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+
+    const raw = await res.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      data = { error: raw || 'non_json_response' };
+    }
+
+    if (!res.ok) {
+      const msg = data?.error || 'Unable to generate token.';
+      showMsg('pt-error', msg);
+      return;
+    }
+
+    showMsg('pt-success', `Token generated: ${data.token_number}`);
+    await refreshTokens();
+  });
+
+  document.getElementById('pt-refresh').addEventListener('click', async () => {
+    await refreshTokens();
+    if (selectedTokenId) await refreshStatus();
+  });
+
+  document.getElementById('pt-cancel').addEventListener('click', async () => {
+    if (!selectedTokenId) return;
+    const res = await fetch(`/patient/token/cancel/${selectedTokenId}`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+
+    const raw = await res.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      data = { error: raw || 'non_json_response' };
+    }
+    if (!res.ok) {
+      showMsg('st-error', data?.error || 'Unable to cancel token.');
+      return;
+    }
+    showMsg('st-error', '');
+    await refreshTokens();
+    await refreshStatus();
+  });
+
+  if (window.EventSource) {
+    const es = new EventSource('/stream');
+    es.onmessage = async () => {
+      await refreshTokens();
+      if (selectedTokenId) await refreshStatus();
+    };
+  }
+
+  (async () => {
+    await refreshTokens();
+  })();
+</script>
+{% endblock %}

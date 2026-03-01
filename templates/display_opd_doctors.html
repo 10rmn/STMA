@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>STMA Doctor Display Board</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(1200px 800px at 12% 18%, rgba(102,126,234,0.20), transparent 55%),
+                    radial-gradient(1200px 800px at 88% 82%, rgba(43,211,255,0.14), transparent 52%),
+                    linear-gradient(135deg, #0f0f23, #1a1a2e, #16213e);
+        background-attachment: fixed;
+      }
+      .fade {
+        transition: opacity 420ms ease;
+      }
+      .fade-out { opacity: 0.0; }
+      .fade-in { opacity: 1.0; }
+      .glow {
+        text-shadow: 0 0 18px rgba(43,211,255,0.25);
+      }
+    </style>
+  </head>
+  <body class="text-slate-100">
+    <div class="min-h-screen flex flex-col">
+      <!-- Emergency Panel (isolated) -->
+      <div class="w-full border-b border-white/10 bg-red-950/35 backdrop-blur-xl">
+        <div class="max-w-6xl mx-auto px-6 py-5">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <div class="text-sm uppercase tracking-widest text-red-200/80">Emergency Queue</div>
+              <div class="text-2xl md:text-3xl font-black text-red-100">EMERGENCY</div>
+            </div>
+            <div class="flex flex-wrap gap-3 items-center">
+              <div class="px-4 py-2 rounded-full bg-red-500/15 border border-red-300/25">
+                <div class="text-xs text-red-200/80">Now Serving</div>
+                <div class="text-lg font-extrabold" id="em-now">-</div>
+              </div>
+              <div class="px-4 py-2 rounded-full bg-red-500/10 border border-red-300/20">
+                <div class="text-xs text-red-200/80">Waiting</div>
+                <div class="text-lg font-extrabold" id="em-count">0</div>
+              </div>
+              <div class="px-4 py-2 rounded-full bg-red-500/10 border border-red-300/20">
+                <div class="text-xs text-red-200/80">Est. wait</div>
+                <div class="text-lg font-extrabold" id="em-wait">-</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3" id="em-list"></div>
+        </div>
+      </div>
+
+      <!-- OPD Doctors Panel -->
+      <div class="flex-1">
+        <div class="max-w-6xl mx-auto px-6 py-8">
+          <div class="flex items-end justify-between gap-4">
+            <div>
+              <div class="text-sm uppercase tracking-widest text-slate-300/70">OPD Doctor Queue</div>
+              <div class="text-4xl md:text-6xl font-black glow" id="doctor-name">-</div>
+            </div>
+            <div class="text-right">
+              <div class="text-xs text-slate-300/70">Switching in</div>
+              <div class="text-2xl md:text-3xl font-extrabold text-cyan-300" id="countdown">30s</div>
+            </div>
+          </div>
+
+          <div class="mt-6" id="mode-hint" data-mode="{{ mode }}"></div>
+
+          <div class="mt-6 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-6 md:p-8 fade fade-in" id="panel">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div class="text-slate-300/80 font-semibold">Now Serving</div>
+              <div class="text-3xl md:text-5xl font-black text-white" id="now-serving">-</div>
+            </div>
+            <div class="mt-2 text-slate-300/70" id="now-patient">&nbsp;</div>
+
+            <div class="mt-7">
+              <div class="text-slate-200 font-bold">Next Patients</div>
+              <div class="mt-3 grid grid-cols-1 gap-3" id="queue"></div>
+            </div>
+          </div>
+
+          <!-- Grid mode -->
+          <div class="mt-6 hidden" id="grid"></div>
+
+          <div class="mt-6 flex items-center justify-between text-slate-300/70 text-sm">
+            <div>Mode: <span class="font-semibold text-slate-200" id="mode">{{ mode }}</span></div>
+            <div id="updated">Updated: -</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const MODE = (document.getElementById('mode')?.textContent || 'carousel').trim().toLowerCase();
+      let doctors = [];
+      let currentDoctorIndex = 0;
+      let rotationSeconds = 30;
+      let countdown = rotationSeconds;
+      let rotationTimer = null;
+      let countdownTimer = null;
+      let lastPayloadTs = 0;
+
+      function badgeFor(row) {
+        if (!row) return { text: 'Normal', cls: 'bg-slate-400/15 border-slate-300/20 text-slate-200' };
+        const isFollowup = (row.is_followup || 0) === 1;
+        const risk = Number(row.risk_score || 0);
+        if (isFollowup) return { text: 'Follow-Up', cls: 'bg-blue-400/15 border-blue-300/25 text-blue-100' };
+        if (risk >= 80) return { text: 'High Risk', cls: 'bg-orange-400/15 border-orange-300/25 text-orange-100' };
+        return { text: 'Normal', cls: 'bg-slate-400/15 border-slate-300/20 text-slate-200' };
+      }
+
+      function fmtTime(iso) {
+        if (!iso) return '-';
+        try {
+          return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch (e) {
+          return '-';
+        }
+      }
+
+      function setFade(isOut) {
+        const el = document.getElementById('panel');
+        if (!el) return;
+        el.classList.toggle('fade-out', !!isOut);
+        el.classList.toggle('fade-in', !isOut);
+      }
+
+      function triageBadge(level) {
+        const lv = Number(level || 0);
+        if (lv === 1) return { text: 'T1 Critical', cls: 'bg-red-400/20 border-red-200/30 text-red-100' };
+        if (lv === 2) return { text: 'T2 Very Urgent', cls: 'bg-orange-400/20 border-orange-200/30 text-orange-100' };
+        if (lv === 3) return { text: 'T3 Urgent', cls: 'bg-yellow-300/20 border-yellow-200/30 text-yellow-100' };
+        if (lv === 4) return { text: 'T4 Semi', cls: 'bg-cyan-300/15 border-cyan-200/25 text-cyan-100' };
+        return { text: 'T5 Non-Urgent', cls: 'bg-slate-400/15 border-slate-300/20 text-slate-200' };
+      }
+
+      function renderEmergency(payload) {
+        const now = payload?.now_serving;
+        const nowText = now ? `${now.patient_name || 'Patient'} (T${now.triage_level || '-'})` : '-';
+        document.getElementById('em-now').textContent = nowText;
+        document.getElementById('em-count').textContent = String(payload?.waiting_count || 0);
+        document.getElementById('em-wait').textContent = payload?.estimated_wait_min != null ? `${payload.estimated_wait_min} min` : '-';
+
+        const list = document.getElementById('em-list');
+        list.innerHTML = '';
+        const items = (payload?.queue || []).slice(0, 3);
+        for (const t of items) {
+          const b = triageBadge(t.triage_level);
+          const div = document.createElement('div');
+          div.className = 'rounded-2xl border border-red-200/15 bg-red-500/10 px-4 py-3';
+          div.innerHTML = `
+            <div class="flex items-center justify-between gap-3">
+              <div class="font-extrabold text-red-50">${t.patient_name || 'Patient'}</div>
+              <div class="text-xs px-3 py-1 rounded-full border ${b.cls}">${b.text}</div>
+            </div>
+            <div class="text-sm text-red-100/80 mt-1">Case ID: ${t.case_id}</div>
+          `;
+          list.appendChild(div);
+        }
+      }
+
+      function renderCarousel() {
+        if (!doctors.length) return;
+        const d = doctors[currentDoctorIndex];
+        document.getElementById('doctor-name').textContent = d.doctor_name;
+
+        const ns = d.now_serving?.token_number || '-';
+        document.getElementById('now-serving').textContent = ns;
+        const pname = d.now_serving?.patient_name ? `Patient: ${d.now_serving.patient_name}` : '\u00A0';
+        document.getElementById('now-patient').textContent = pname;
+
+        const q = document.getElementById('queue');
+        q.innerHTML = '';
+        const items = (d.queue || []).slice(0, 6);
+        if (!items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-slate-300/70';
+          empty.textContent = 'No waiting tokens for this doctor.';
+          q.appendChild(empty);
+          return;
+        }
+
+        let idx = 1;
+        for (const t of items) {
+          const b = badgeFor(t);
+          const row = document.createElement('div');
+          row.className = 'rounded-2xl border border-white/10 bg-white/5 px-4 py-4 flex items-center justify-between gap-4';
+          row.innerHTML = `
+            <div class="min-w-0">
+              <div class="flex items-center gap-3 flex-wrap">
+                <div class="text-lg md:text-2xl font-black text-cyan-300">${idx}. ${t.patient_name || 'Patient'}</div>
+                <div class="text-sm md:text-base font-semibold text-slate-200">${t.token_number}</div>
+                <div class="text-xs md:text-sm px-3 py-1 rounded-full border ${b.cls}">${b.text}</div>
+              </div>
+              <div class="text-sm text-slate-300/70 mt-1">Token ID: ${t.token_id}</div>
+            </div>
+            <div class="text-right">
+              <div class="text-xs text-slate-300/70">Est. start</div>
+              <div class="text-xl md:text-2xl font-extrabold text-cyan-200">${fmtTime(t.estimated_start_time)}</div>
+            </div>
+          `;
+          q.appendChild(row);
+          idx += 1;
+        }
+      }
+
+      function renderGrid() {
+        const grid = document.getElementById('grid');
+        grid.innerHTML = '';
+        grid.className = 'mt-6 grid grid-cols-1 md:grid-cols-2 gap-4';
+
+        for (const d of doctors) {
+          const card = document.createElement('div');
+          card.className = 'rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-5';
+          const ns = d.now_serving?.token_number || '-';
+          const items = (d.queue || []).slice(0, 4);
+          card.innerHTML = `
+            <div class="flex items-center justify-between gap-3">
+              <div class="font-black text-xl text-cyan-200">${d.doctor_name}</div>
+              <div class="text-sm text-slate-300/70">Now: <span class="font-bold text-slate-100">${ns}</span></div>
+            </div>
+            <div class="mt-3 space-y-2">
+              ${items.map((t, i) => {
+                const b = badgeFor(t);
+                return `
+                  <div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="font-bold truncate">${i+1}. ${t.patient_name || 'Patient'} <span class="text-slate-300/70">(${t.token_number})</span></div>
+                      <div class="text-xs text-slate-300/70">${b.text}</div>
+                    </div>
+                    <div class="text-sm font-extrabold text-cyan-200">${fmtTime(t.estimated_start_time)}</div>
+                  </div>
+                `;
+              }).join('') || '<div class="text-sm text-slate-300/70">No waiting tokens.</div>'}
+            </div>
+          `;
+          grid.appendChild(card);
+        }
+      }
+
+      function render() {
+        if (MODE === 'grid') {
+          document.getElementById('panel').classList.add('hidden');
+          document.getElementById('grid').classList.remove('hidden');
+          renderGrid();
+        } else {
+          document.getElementById('grid').classList.add('hidden');
+          document.getElementById('panel').classList.remove('hidden');
+          renderCarousel();
+        }
+        document.getElementById('updated').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+      }
+
+      async function fetchAll() {
+        try {
+          const [opdRes, emRes] = await Promise.all([
+            fetch('/api/display/opd-doctors'),
+            fetch('/queue/emergency'),
+          ]);
+          if (opdRes.ok) {
+            const data = await opdRes.json();
+            doctors = Array.isArray(data) ? data : [];
+            if (currentDoctorIndex >= doctors.length) currentDoctorIndex = 0;
+            render();
+          }
+          if (emRes.ok) {
+            const em = await emRes.json();
+            renderEmergency(em);
+          }
+          lastPayloadTs = Date.now();
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      function startRotation() {
+        if (rotationTimer) clearInterval(rotationTimer);
+        if (countdownTimer) clearInterval(countdownTimer);
+
+        countdown = rotationSeconds;
+        document.getElementById('countdown').textContent = `${countdown}s`;
+
+        countdownTimer = setInterval(() => {
+          countdown = Math.max(0, countdown - 1);
+          document.getElementById('countdown').textContent = `${countdown}s`;
+        }, 1000);
+
+        rotationTimer = setInterval(() => {
+          if (!doctors.length || MODE === 'grid') return;
+          setFade(true);
+          setTimeout(() => {
+            currentDoctorIndex = (currentDoctorIndex + 1) % doctors.length;
+            renderCarousel();
+            setFade(false);
+          }, 320);
+          countdown = rotationSeconds;
+        }, rotationSeconds * 1000);
+      }
+
+      function startRealtime() {
+        const es = new EventSource('/stream');
+        es.onmessage = (evt) => {
+          try {
+            const payload = JSON.parse(evt.data);
+            const t = payload?.type;
+            if (!t) return;
+            if (['token_generated','service_started','service_completed','followup_created','risk_updated','reassigned','EMERGENCY_CREATED','EMERGENCY_COMPLETED','EMERGENCY_UPDATED','EMERGENCY_OVERLOAD','EMERGENCY_SURGE_ACTIVATED','EMERGENCY_SURGE_DEACTIVATED'].includes(t)) {
+              fetchAll();
+            }
+          } catch (e) {}
+        };
+      }
+
+      fetchAll().then(() => {
+        startRotation();
+        startRealtime();
+      });
+
+      // Mobile swipe (carousel)
+      let touchStartX = null;
+      document.addEventListener('touchstart', (e) => {
+        if (!e.touches || !e.touches.length) return;
+        touchStartX = e.touches[0].clientX;
+      }, { passive: true });
+      document.addEventListener('touchend', (e) => {
+        if (MODE === 'grid') return;
+        if (touchStartX == null) return;
+        const endX = (e.changedTouches && e.changedTouches.length) ? e.changedTouches[0].clientX : null;
+        if (endX == null) return;
+        const dx = endX - touchStartX;
+        touchStartX = null;
+        if (Math.abs(dx) < 50) return;
+        setFade(true);
+        setTimeout(() => {
+          if (dx < 0) currentDoctorIndex = (currentDoctorIndex + 1) % (doctors.length || 1);
+          else currentDoctorIndex = (currentDoctorIndex - 1 + (doctors.length || 1)) % (doctors.length || 1);
+          renderCarousel();
+          setFade(false);
+          countdown = rotationSeconds;
+        }, 220);
+      }, { passive: true });
+    </script>
+  </body>
+</html>

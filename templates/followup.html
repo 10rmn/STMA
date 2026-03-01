@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <div class="stma-title h4 mb-0">Register Follow-Up Visit</div>
+      <div class="stma-soft small">Create a follow-up token linked to an original visit</div>
+    </div>
+  </div>
+
+  {% if message %}
+    <div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>{{ message }}</div>
+  {% endif %}
+  {% if error %}
+    <div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-1"></i>{{ error }}</div>
+  {% endif %}
+
+  <div class="stma-card p-3">
+    <form method="post">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Original token reference</label>
+        <input class="form-control" name="original_token" placeholder="Enter token number (e.g., CON1-ASHA) or ID" value="{{ request.form.get('original_token','') }}" />
+        <div class="small text-muted mt-1">The follow-up will be assigned to the same doctor unless that doctor is inactive.</div>
+      </div>
+
+      {% if original %}
+        <div class="alert alert-info">
+          <div class="fw-semibold">Original token found</div>
+          <div class="small">
+            Token: <strong>{{ original['token_number'] }}</strong> (ID {{ original['id'] }})
+            <span class="mx-2">|</span>
+            Service: <strong>{{ original['service_name'] }}</strong>
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Doctor</label>
+        <select class="form-select" name="doctor_id">
+          <option value="">Use original doctor</option>
+          {% for d in doctors %}
+            <option value="{{ d['id'] }}" {% if selected_doctor_id and (d['id']|int)==(selected_doctor_id|int) %}selected{% endif %}>{{ d['name'] }}</option>
+          {% endfor %}
+        </select>
+        <div class="small text-muted mt-1">If the original doctor is inactive, select a new doctor.</div>
+      </div>
+
+      <button class="btn btn-primary" type="submit"><i class="bi bi-plus-circle me-1"></i>Register Follow-Up</button>
+      <a class="btn btn-outline-light ms-2" href="/generate"><i class="bi bi-arrow-left me-1"></i>Back</a>
+    </form>
+  </div>
+{% endblock %}

@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <div class="row">
+    <div class="col-md-6">
+      <div class="stma-title h4">{{ _('token_generator') }}</div>
+      {% if message %}
+        <div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>{{ message }}</div>
+      {% endif %}
+      <div class="stma-card p-3">
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Select Service</label>
+            <select class="form-select" name="service" id="service-select">
+              <option>Consultation</option>
+              <option>Lab Test</option>
+              <option>X-Ray</option>
+              <option>ENT</option>
+              <option>Skin Treatment</option>
+              <option>Ear Checkup</option>
+              <option>Back Pain</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Select Doctor</label>
+            <select class="form-select" name="doctor_id" id="doctor-select" required>
+              <option value="">Select doctor</option>
+              {% if doctors %}
+                {% for d in doctors %}
+                  <option value="{{ d['id'] }}" {% if selected_doctor_id and (d['id']|int) == (selected_doctor_id|int) %}selected{% endif %}>{{ d['name'] }}</option>
+                {% endfor %}
+              {% endif %}
+            </select>
+            <div class="small text-muted mt-1" id="doctor-queue">Doctor queue: -</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Patient Category</label>
+            <select class="form-select" name="patient_category" id="patient-category" required>
+              <option value="Regular" selected>Regular</option>
+              <option value="Senior Citizen">Senior Citizen</option>
+              <option value="Chronic Illness">Chronic Illness</option>
+              <option value="Emergency">Emergency</option>
+            </select>
+            <div class="small text-muted mt-1">Used to compute Risk Score and AI priority.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Patient Name (optional)</label>
+            <input class="form-control" name="patient_name" placeholder="Enter patient name" value="{{ request.form.get('patient_name','') }}" />
+          </div>
+          <div class="mb-3">
+            <div class="stma-card p-3" style="background: rgba(255,255,255,0.06); box-shadow:none; border: 1px solid rgba(255,255,255,0.10);">
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <div class="small text-muted">Predictive Waiting Time</div>
+                  <div class="fw-semibold">{{ _('estimated_waiting_time') }}</div>
+                </div>
+                <i class="bi bi-clock-history fs-4 text-primary"></i>
+              </div>
+              <div class="fs-5 mt-1" id="eta-value">-</div>
+              <div class="small text-muted">Heuristic: Avg service time × tokens ahead in queue</div>
+            </div>
+          </div>
+          <div class="d-flex flex-wrap" style="gap: 10px;">
+            <button class="btn btn-primary" type="submit"><i class="bi bi-plus-circle me-1"></i>{{ _('generate_token') }}</button>
+            <a class="btn btn-outline-info" href="/followup"><i class="bi bi-arrow-repeat me-1"></i>Register Follow-Up Visit</a>
+          </div>
+        </form>
+      </div>
+      {% if token %}
+        <div class="mt-3">
+          <div class="stma-card p-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <div>
+                <div class="small text-muted">{{ _('your_token') }}</div>
+                <div class="fs-4 fw-bold">{{ token }}</div>
+              </div>
+              <i class="bi bi-ticket-perforated fs-3 text-primary"></i>
+            </div>
+          </div>
+        </div>
+        <div class="mt-2">
+          <div class="alert alert-info mb-0" id="eta-after-generate"><i class="bi bi-info-circle me-1"></i>
+            {{ _('estimated_waiting_time') }}:
+            <strong>
+              {% if estimated_wait_min is not none %}
+                {{ estimated_wait_min }} minutes
+              {% else %}
+                Collecting data (complete a few tokens to enable ETA)
+              {% endif %}
+            </strong>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+    <div class="col-md-6">
+      <div class="stma-title h5">{{ _('recent_tokens') }}</div>
+      <div class="stma-card p-3">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Token</th><th>Service</th><th>Time</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for r in recent %}
+              <tr>
+                <td class="fw-semibold">{{ r['token_number'] }}</td>
+                <td>{{ r['service_name'] }}</td>
+                <td class="small text-muted">{{ r['generated_time'] }}</td>
+                <td>
+                  {% if r['status'] == 'Completed' %}
+                    <span class="badge text-bg-success">Completed</span>
+                  {% elif r['status'] == 'InProgress' %}
+                    <span class="badge text-bg-primary">InProgress</span>
+                  {% else %}
+                    <span class="badge text-bg-secondary">Generated</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function refreshDoctors() {
+      const serviceSel = document.getElementById('service-select');
+      const doctorSel = document.getElementById('doctor-select');
+      if (!serviceSel || !doctorSel) return;
+      const service = serviceSel.value;
+      const res = await fetch(`/api/doctors?service=${encodeURIComponent(service)}`);
+      if (!res.ok) return;
+      const docs = await res.json();
+      const current = doctorSel.value;
+      doctorSel.innerHTML = '<option value="">Select doctor</option>';
+      for (const d of docs) {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = d.name;
+        if (String(d.id) === String(current)) opt.selected = true;
+        doctorSel.appendChild(opt);
+      }
+      await refreshDoctorMetrics();
+    }
+
+    async function refreshDoctorMetrics() {
+      const doctorSel = document.getElementById('doctor-select');
+      const eta = document.getElementById('eta-value');
+      const q = document.getElementById('doctor-queue');
+      if (!doctorSel || !eta || !q) return;
+      const did = doctorSel.value;
+      if (!did) {
+        eta.textContent = '-';
+        q.textContent = 'Doctor queue: -';
+        return;
+      }
+      const res = await fetch(`/api/doctor_metrics?doctor_id=${encodeURIComponent(did)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      q.textContent = `Doctor queue: ${data.queue_len === null ? '-' : data.queue_len}`;
+      if (data.estimated_wait_min === null) {
+        eta.textContent = 'Collecting data (need completed tokens)';
+      } else {
+        eta.textContent = `${data.estimated_wait_min} minutes`;
+      }
+    }
+
+    const sel = document.getElementById('service-select');
+    const dsel = document.getElementById('doctor-select');
+    if (sel) {
+      sel.addEventListener('change', refreshDoctors);
+    }
+    if (dsel) {
+      dsel.addEventListener('change', refreshDoctorMetrics);
+    }
+    refreshDoctors();
+  </script>
+{% endblock %}
