@@ -108,7 +108,6 @@ conn.close()
 PY
 ```
 
-Share the DB with judges
 - Compress the DB for handover:
 ```powershell
 Compress-Archive -Path tokens.db -DestinationPath tokens.zip
@@ -120,7 +119,3 @@ Possible next enhancements (optional)
 - Add CSV export for dashboard metrics.
 - Improve authentication (stronger secret, session security) for production.
 
-If you want, I can add a one-click `Download tokens.db` button on the Dashboard and a CSV export endpoint — tell me and I'll add it.
-
----
-Created for a hackathon demo. Simple, clear, and easy to run.
